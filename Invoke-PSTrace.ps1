@@ -10,8 +10,7 @@ function Invoke-PSTrace {
         [string]$ComputerName,
         [switch]$OpenWithMessageAnalyzer,
         [pscredential]$Credential
-    )
-    
+    )  
         DynamicParam 
         {
             $ParameterName = 'ETWProvider' 
@@ -27,36 +26,34 @@ function Invoke-PSTrace {
             $RuntimeParameterDictionary.Add($ParameterName, $RuntimeParameter)
             return $RuntimeParameterDictionary
         }
-
     begin 
     {
         $ETWProvider = $PsBoundParameters[$ParameterName]
-        Get-CimSession -ComputerName $ComputerName -ErrorAction SilentlyContinue | Remove-CimSession -Confirm:$False
-        Get-NetEventSession -Name "Session1" -ErrorAction SilentlyContinue | Remove-NetEventSession -Confirm:$False
-        Remove-Item -Path "C:\Windows\Temp\$ComputerName-Trace.etl" -Force -Confirm:$False -ErrorAction SilentlyContinue
     }
 
     process 
     {
+        #Remove any existing sessions
+        Get-CimSession -ComputerName $ComputerName -ErrorAction SilentlyContinue | Remove-CimSession -Confirm:$False
+        Get-NetEventSession -Name "Session1" -ErrorAction SilentlyContinue | Remove-NetEventSession -Confirm:$False
+        Remove-Item -Path "C:\Windows\Temp\$ComputerName-Trace.etl" -Force -Confirm:$False -ErrorAction SilentlyContinue
+        #Create new session
         try 
         {
-            $Cim = New-CimSession -ComputerName $ComputerName -Credential $Credential
-            New-NetEventSession -Name "Session1" -CimSession $Cim -LocalFilePath "C:\Windows\Temp\$ComputerName-Trace.etl" -CaptureMode SaveToFile -ErrorAction stop | out-null
-            Add-NetEventProvider -CimSession $Cim -Name $ETWProvider -SessionName "Session1" -ErrorAction stop | out-null
-            Start-NetEventSession -Name "Session1" -CimSession $Cim -ErrorAction stop | out-null
+            $Cim = New-CimSession -ComputerName $ComputerName -Credential $Credential -ErrorAction Stop
+            New-NetEventSession -Name "Session1" -CimSession $Cim -LocalFilePath "C:\Windows\Temp\$ComputerName-Trace.etl" -ErrorAction Stop -CaptureMode SaveToFile | Out-Null
         }
-        catch
+        catch 
         {
-            $ErrorMessage = $_.Exception.Message
-            Write-Error -Message $ErrorMessage
-            Get-NetEventSession -Name "Session1" -CimSession $Cim -ErrorAction SilentlyContinue | Remove-NetEventSession -Confirm:$False
-            Get-CimSession -ComputerName $ComputerName -ErrorAction SilentlyContinue | Remove-CimSession -Confirm:$False
-            Remove-Item -Path "C:\Windows\Temp\$ComputerName-Trace.etl" -Force -Confirm:$False -ErrorAction SilentlyContinue
-            Return 
+            Write-Error $_
+            Break
+        }    
+        Add-NetEventProvider -CimSession $Cim -Name $ETWProvider -SessionName "Session1" | Out-Null
+        Start-NetEventSession -Name "Session1" -CimSession $Cim | Out-Null
+        if (Get-NetEventSession -CimSession $Cim)
+        {
+            Read-Host 'Press enter to stop trace' | Out-Null
         }
-
-        Read-Host 'Press enter to stop trace'  | Out-Null
-
         Stop-NetEventSession -Name 'Session1' -CimSession $Cim   
         Remove-NetEventProvider -Name $ETWProvider -CimSession $Cim  
         Remove-NetEventSession -Name 'Session1' -CimSession $Cim  
@@ -66,15 +63,13 @@ function Invoke-PSTrace {
             Copy-Item -Path "\\$ComputerName\C$\Windows\Temp\$ComputerName-trace.etl" -Destination 'C:\Windows\Temp' -Force
         }
         Get-CimSession -ComputerName $ComputerName -ErrorAction SilentlyContinue | Remove-CimSession -Confirm:$False
-        $log = Get-WinEvent -Path "C:\Windows\Temp\$ComputerName-trace.etl" -Oldest -MaxEvents 20000
         if ($OpenWithMessageAnalyzer)
         {
              Start-Process -FilePath 'C:\Program Files\Microsoft Message Analyzer\MessageAnalyzer.exe' -ArgumentList "C:\Windows\Temp\$ComputerName-trace.etl"
         }
         else 
         {
-             $log 
+             Get-WinEvent -Path "C:\Windows\Temp\$ComputerName-trace.etl" -Oldest 
         }
     }
-
 }
